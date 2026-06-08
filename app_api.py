@@ -4,7 +4,9 @@ import pandas as pd
 import numpy as np
 import datetime
 import google.generativeai as genai
-import requests # 야후 파이낸스 접속 우회를 위한 라이브러리 추가
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # ==========================================
 # 🤖 [에이전트 시스템 지침] System Prompt
@@ -25,15 +27,8 @@ Instructions: Professional Equity Research Agent
 * 전체 보고서는 마크다운(Markdown) 문법을 사용하여 가독성 있게 구조화한다.
 """
 
-# 1. 페이지 레이아웃 및 테마 설정
-st.set_page_config(
-    page_title="Professional Equity Research Agent (AI Powered)",
-    page_icon="💼",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Professional Equity Research Agent", page_icon="💼", layout="wide")
 
-# 커스텀 CSS
 st.markdown("""
 <style>
     .main-title { font-size: 2.5rem; font-weight: 700; color: #1E3A8A; margin-bottom: 5px; }
@@ -42,12 +37,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 사이드바 설정
 st.sidebar.header("🔑 LLM API 설정")
 api_key = st.sidebar.text_input("Gemini API Key 입력", type="password")
-st.sidebar.caption("※ API 키는 저장되지 않으며, 현재 세션에서만 사용됩니다.")
 st.sidebar.markdown("---")
-
 st.sidebar.header("🔍 분석 대상 식별")
 ticker_input = st.sidebar.text_input("티커 심볼 입력", value="AAPL").upper().strip()
 analyze_btn = st.sidebar.button("전사적 분석 체계 가동", type="primary")
@@ -57,23 +49,27 @@ st.markdown('<div class="subtitle">실시간 금융 데이터 수집 및 LLM 기
 
 if analyze_btn or ticker_input:
     if not api_key:
-        st.warning("⚠️ 좌측 사이드바에 Gemini API Key를 입력해야 AI가 리포트를 작성할 수 있습니다.")
+        st.warning("⚠️ 좌측 사이드바에 Gemini API Key를 입력해야 합니다.")
         st.stop()
 
-    with st.spinner("1/2: 실시간 금융 데이터 수집 및 연산 중... (우회 접속 시도 중)"):
+    with st.spinner("1/2: 실시간 금융 데이터 수집 중... (야후 파이낸스 우회 접속 시도 중)"):
         try:
-            # [핵심 변경 사항] 야후 파이낸스 차단 우회를 위한 User-Agent 세션 설정
+            # [강력한 우회 로직] 429 에러 발생 시 간격을 두고 최대 5번 재시도
             session = requests.Session()
+            retry = Retry(connect=5, backoff_factor=1.5, status_forcelist=[429, 500, 502, 503, 504])
+            adapter = HTTPAdapter(max_retries=retry)
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
             session.headers.update({
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
             })
             
-            # 일반 호출 대신 session을 태워서 호출
             ticker = yf.Ticker(ticker_input, session=session)
             info = ticker.info
             
             if not info or ('regularMarketPrice' not in info and 'currentPrice' not in info):
-                st.error("정밀 분석을 위해 올바른 티커 심볼을 입력해 주십시오. (또는 일시적 차단이 풀릴 때까지 5분만 기다려 주세요)")
+                st.error("정밀 분석을 위해 올바른 티커 심볼을 입력해 주십시오.")
                 st.stop()
                 
             company_name = info.get('longName', ticker_input)
@@ -90,7 +86,6 @@ if analyze_btn or ticker_input:
                 stockholders_equity = balancesheet.loc['Stockholders Equity'].iloc[0]
                 net_income = financials.loc['Net Income'].iloc[0]
                 total_liab = balancesheet.loc['Total Liabilities Net Min Interest'].iloc[0] if 'Total Liabilities Net Min Interest' in balancesheet.index else balancesheet.loc['Total Assets'].iloc[0] * 0.4
-                
                 current_ratio = round(current_assets / current_liab, 4)
                 debt_to_equity = round(total_liab / stockholders_equity, 4)
                 roe = round(net_income / stockholders_equity, 4)
@@ -101,20 +96,16 @@ if analyze_btn or ticker_input:
             upside_pct = round(((target_price_dcf - current_price) / current_price) * 100, 2)
 
             st.success("데이터 수집 완료! AI가 분석을 시작합니다.")
-            
             col1, col2, col3 = st.columns(3)
             col1.metric("최신 주가", f"{current_price:,} {currency}")
             col2.metric("유동비율 (Current Ratio)", current_ratio)
             col3.metric("DCF 내재가치 (추정)", f"{target_price_dcf:,} {currency}")
 
         except Exception as e:
-            st.error(f"데이터 수집 중 오류가 발생했습니다: {str(e)}\n\n야후 파이낸스 서버의 일시적인 속도 제한일 수 있습니다. 약 5분 뒤에 다시 시도해 주세요.")
+            st.error(f"데이터 수집 실패: {str(e)}\n\n🚨 현재 Streamlit 클라우드 서버의 IP가 야후 파이낸스에 의해 강력하게 차단되었습니다. 내일 다시 시도하시거나 '해결 방법 2(로컬 실행)'를 권장합니다.")
             st.stop()
 
-    # ==========================================
-    # 🧠 [호환성 극대화] Gemini API 호출
-    # ==========================================
-    with st.spinner("2/2: LLM이 데이터를 분석하여 전문 에퀴티 리포트를 집필하고 있습니다... (약 10~20초 소요)"):
+    with st.spinner("2/2: LLM이 데이터를 분석하여 전문 에퀴티 리포트를 집필하고 있습니다..."):
         try:
             financial_data_context = f"""
 {AGENT_INSTRUCTIONS}
@@ -127,20 +118,18 @@ if analyze_btn or ticker_input:
 - 시가총액: {market_cap} {currency}
 - EPS (주당순이익): {eps}
 
-[핵심 재무 비율 (최근 분기 기준)]
+[핵심 재무 비율]
 - 유동비율(Current Ratio): {current_ratio}
 - 부채비율(Debt to Equity): {debt_to_equity}
 - 자기자본이익률(ROE): {roe}
 
 [가치평가(Valuation) 데이터]
-- DCF 모델 기반 산출 내재가치: {target_price_dcf} {currency}
-- 현재가 대비 상승여력(Upside): {upside_pct}%
+- DCF 모델 내재가치: {target_price_dcf} {currency}
+- 상승여력(Upside): {upside_pct}%
 
-위 지침(System Instructions)과 데이터를 바탕으로 정밀 분석을 수행하고, 최종 투자 의사결정(BUY/HOLD/SELL)이 포함된 에퀴티 리서치 보고서를 마크다운으로 작성해 주십시오.
+위 데이터를 바탕으로 최종 투자 의사결정(BUY/HOLD/SELL)이 포함된 에퀴티 리서치 보고서를 마크다운으로 작성해 주십시오.
 """
-
             genai.configure(api_key=api_key)
-            
             try:
                 model = genai.GenerativeModel('gemini-1.5-flash')
                 response = model.generate_content(financial_data_context, generation_config={"temperature": 0.3})
@@ -153,15 +142,7 @@ if analyze_btn or ticker_input:
             st.markdown("---")
             st.markdown('<div class="section-header">📑 최종 AI 에퀴티 리서치 보고서</div>', unsafe_allow_html=True)
             st.markdown(ai_report_content)
-            
-            st.markdown("---")
-            st.download_button(
-                label="📥 AI 에퀴티 리서치 보고서(Markdown) 다운로드",
-                data=ai_report_content,
-                file_name=f"AI_Equity_Research_{ticker_input}.md",
-                mime="text/markdown",
-                type="primary"
-            )
+            st.download_button("📥 AI 에퀴티 리서치 보고서 다운로드", data=ai_report_content, file_name=f"AI_Report_{ticker_input}.md", mime="text/markdown", type="primary")
 
         except Exception as e:
-            st.error(f"API 호출 중 오류가 발생했습니다. 키가 정확한지 확인해주세요.\n\n상세 에러: {str(e)}")
+            st.error(f"API 호출 오류: {str(e)}")
