@@ -1,8 +1,9 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import numpy as np
 import datetime
-from openai import OpenAI  # LLM API 연결을 위한 라이브러리 추가
+import google.generativeai as genai
 
 # ==========================================
 # 🤖 [에이전트 시스템 지침] System Prompt
@@ -40,9 +41,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 사이드바 설정 (API 키 입력란 추가)
+# 사이드바 설정 (API 키 입력란)
 st.sidebar.header("🔑 LLM API 설정")
-api_key = st.sidebar.text_input("OpenAI API Key 입력 (sk-...)", type="password")
+api_key = st.sidebar.text_input("Gemini API Key 입력", type="password")
 st.sidebar.caption("※ API 키는 저장되지 않으며, 현재 세션에서만 사용됩니다.")
 st.sidebar.markdown("---")
 
@@ -55,7 +56,7 @@ st.markdown('<div class="subtitle">실시간 금융 데이터 수집 및 LLM 기
 
 if analyze_btn or ticker_input:
     if not api_key:
-        st.warning("⚠️ 좌측 사이드바에 OpenAI API Key를 입력해야 AI가 리포트를 작성할 수 있습니다.")
+        st.warning("⚠️ 좌측 사이드바에 Gemini API Key를 입력해야 AI가 리포트를 작성할 수 있습니다.")
         st.stop()
 
     with st.spinner("1/2: 실시간 금융 데이터 수집 및 연산 중..."):
@@ -107,7 +108,7 @@ if analyze_btn or ticker_input:
             st.stop()
 
     # ==========================================
-    # 🧠 [LLM API 호출 부분] 수집된 데이터를 AI에게 전송
+    # 🧠 [Gemini API 호출 부분] 수집된 데이터를 AI에게 전송
     # ==========================================
     with st.spinner("2/2: LLM이 데이터를 분석하여 전문 에퀴티 리포트를 집필하고 있습니다... (약 10~20초 소요)"):
         try:
@@ -131,19 +132,13 @@ if analyze_btn or ticker_input:
             지침에 따라 위 데이터를 정밀 분석하고, 최종 투자 의사결정(BUY/HOLD/SELL)이 포함된 에퀴티 리서치 보고서를 마크다운으로 작성해 주십시오.
             """
 
-            # OpenAI API 클라이언트 초기화 및 호출
-            client = OpenAI(api_key=api_key)
-            response = client.chat.completions.create(
-                model="gpt-4o-mini", # 비용 효율이 좋고 빠른 최신 모델 (필요시 gpt-4o로 변경 가능)
-                messages=[
-                    {"role": "system", "content": AGENT_INSTRUCTIONS},
-                    {"role": "user", "content": financial_data_context}
-                ],
-                temperature=0.3 # 분석 리포트이므로 환각(할루시네이션)을 줄이기 위해 온도를 낮춤
-            )
+            # Gemini API 설정 및 호출
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=AGENT_INSTRUCTIONS)
+            response = model.generate_content(financial_data_context, generation_config={"temperature": 0.3})
             
             # AI가 작성한 리포트 결과물
-            ai_report_content = response.choices[0].message.content
+            ai_report_content = response.text
 
             # 결과 출력
             st.markdown("---")
