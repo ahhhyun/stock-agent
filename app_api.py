@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import datetime
 import google.generativeai as genai
+import requests # 야후 파이낸스 접속 우회를 위한 라이브러리 추가
 
 # ==========================================
 # 🤖 [에이전트 시스템 지침] System Prompt
@@ -59,13 +60,20 @@ if analyze_btn or ticker_input:
         st.warning("⚠️ 좌측 사이드바에 Gemini API Key를 입력해야 AI가 리포트를 작성할 수 있습니다.")
         st.stop()
 
-    with st.spinner("1/2: 실시간 금융 데이터 수집 및 연산 중..."):
+    with st.spinner("1/2: 실시간 금융 데이터 수집 및 연산 중... (우회 접속 시도 중)"):
         try:
-            ticker = yf.Ticker(ticker_input)
+            # [핵심 변경 사항] 야후 파이낸스 차단 우회를 위한 User-Agent 세션 설정
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
+            })
+            
+            # 일반 호출 대신 session을 태워서 호출
+            ticker = yf.Ticker(ticker_input, session=session)
             info = ticker.info
             
             if not info or ('regularMarketPrice' not in info and 'currentPrice' not in info):
-                st.error("정밀 분석을 위해 올바른 티커 심볼을 입력해 주십시오.")
+                st.error("정밀 분석을 위해 올바른 티커 심볼을 입력해 주십시오. (또는 일시적 차단이 풀릴 때까지 5분만 기다려 주세요)")
                 st.stop()
                 
             company_name = info.get('longName', ticker_input)
@@ -100,7 +108,7 @@ if analyze_btn or ticker_input:
             col3.metric("DCF 내재가치 (추정)", f"{target_price_dcf:,} {currency}")
 
         except Exception as e:
-            st.error(f"데이터 수집 중 오류가 발생했습니다: {str(e)}")
+            st.error(f"데이터 수집 중 오류가 발생했습니다: {str(e)}\n\n야후 파이낸스 서버의 일시적인 속도 제한일 수 있습니다. 약 5분 뒤에 다시 시도해 주세요.")
             st.stop()
 
     # ==========================================
@@ -108,7 +116,6 @@ if analyze_btn or ticker_input:
     # ==========================================
     with st.spinner("2/2: LLM이 데이터를 분석하여 전문 에퀴티 리포트를 집필하고 있습니다... (약 10~20초 소요)"):
         try:
-            # 시스템 지침을 API 파라미터가 아닌 텍스트 내부에 직접 결합 (구버전 SDK 에러 방지)
             financial_data_context = f"""
 {AGENT_INSTRUCTIONS}
 
@@ -134,13 +141,10 @@ if analyze_btn or ticker_input:
 
             genai.configure(api_key=api_key)
             
-            # 자동 우회(Fallback) 시스템 도입
             try:
-                # 1순위: 최신 1.5 Flash 모델 시도
                 model = genai.GenerativeModel('gemini-1.5-flash')
                 response = model.generate_content(financial_data_context, generation_config={"temperature": 0.3})
-            except Exception as flash_error:
-                # 2순위: 1.5 Flash가 막혀있을 경우 범용성이 가장 높은 1.0 Pro 모델로 자동 대체 시도
+            except Exception:
                 model = genai.GenerativeModel('gemini-pro')
                 response = model.generate_content(financial_data_context, generation_config={"temperature": 0.3})
             
