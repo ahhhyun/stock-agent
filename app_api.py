@@ -41,7 +41,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 사이드바 설정 (API 키 입력란 추가)
+# 사이드바 설정
 st.sidebar.header("🔑 LLM API 설정")
 api_key = st.sidebar.text_input("Gemini API Key 입력", type="password")
 st.sidebar.caption("※ API 키는 저장되지 않으며, 현재 세션에서만 사용됩니다.")
@@ -61,7 +61,6 @@ if analyze_btn or ticker_input:
 
     with st.spinner("1/2: 실시간 금융 데이터 수집 및 연산 중..."):
         try:
-            # 1. 야후 파이낸스 데이터 로드
             ticker = yf.Ticker(ticker_input)
             info = ticker.info
             
@@ -69,14 +68,12 @@ if analyze_btn or ticker_input:
                 st.error("정밀 분석을 위해 올바른 티커 심볼을 입력해 주십시오.")
                 st.stop()
                 
-            # 기초 데이터 추출
             company_name = info.get('longName', ticker_input)
             current_price = info.get('currentPrice', info.get('regularMarketPrice', 0.0))
             market_cap = info.get('marketCap', 0)
             eps = info.get('trailingEPS', 0.0)
             currency = info.get('currency', 'USD')
             
-            # 재무비율 계산 시뮬레이션
             try:
                 balancesheet = ticker.quarterly_balancesheet
                 financials = ticker.quarterly_financials
@@ -95,7 +92,6 @@ if analyze_btn or ticker_input:
             target_price_dcf = round(current_price * 1.2354, 2)
             upside_pct = round(((target_price_dcf - current_price) / current_price) * 100, 2)
 
-            # 화면에 수집된 데이터 보여주기
             st.success("데이터 수집 완료! AI가 분석을 시작합니다.")
             
             col1, col2, col3 = st.columns(3)
@@ -108,46 +104,52 @@ if analyze_btn or ticker_input:
             st.stop()
 
     # ==========================================
-    # 🧠 [LLM API 호출 부분] 수집된 데이터를 AI에게 전송
+    # 🧠 [호환성 극대화] Gemini API 호출
     # ==========================================
     with st.spinner("2/2: LLM이 데이터를 분석하여 전문 에퀴티 리포트를 집필하고 있습니다... (약 10~20초 소요)"):
         try:
-            # AI에게 던져줄 데이터 문맥(Context) 정리
+            # 시스템 지침을 API 파라미터가 아닌 텍스트 내부에 직접 결합 (구버전 SDK 에러 방지)
             financial_data_context = f"""
-            [분석 대상 기업 정보]
-            - 기업명: {company_name} ({ticker_input})
-            - 현재가: {current_price} {currency}
-            - 시가총액: {market_cap} {currency}
-            - EPS (주당순이익): {eps}
-            
-            [핵심 재무 비율 (최근 분기 기준)]
-            - 유동비율(Current Ratio): {current_ratio}
-            - 부채비율(Debt to Equity): {debt_to_equity}
-            - 자기자본이익률(ROE): {roe}
-            
-            [가치평가(Valuation) 데이터]
-            - DCF 모델 기반 산출 내재가치: {target_price_dcf} {currency}
-            - 현재가 대비 상승여력(Upside): {upside_pct}%
-            
-            지침에 따라 위 데이터를 정밀 분석하고, 최종 투자 의사결정(BUY/HOLD/SELL)이 포함된 에퀴티 리서치 보고서를 마크다운으로 작성해 주십시오.
-            """
+{AGENT_INSTRUCTIONS}
 
-            # Gemini API 설정 (모델명을 -latest로 수정)
+---
+
+[분석 대상 기업 정보]
+- 기업명: {company_name} ({ticker_input})
+- 현재가: {current_price} {currency}
+- 시가총액: {market_cap} {currency}
+- EPS (주당순이익): {eps}
+
+[핵심 재무 비율 (최근 분기 기준)]
+- 유동비율(Current Ratio): {current_ratio}
+- 부채비율(Debt to Equity): {debt_to_equity}
+- 자기자본이익률(ROE): {roe}
+
+[가치평가(Valuation) 데이터]
+- DCF 모델 기반 산출 내재가치: {target_price_dcf} {currency}
+- 현재가 대비 상승여력(Upside): {upside_pct}%
+
+위 지침(System Instructions)과 데이터를 바탕으로 정밀 분석을 수행하고, 최종 투자 의사결정(BUY/HOLD/SELL)이 포함된 에퀴티 리서치 보고서를 마크다운으로 작성해 주십시오.
+"""
+
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash-latest', system_instruction=AGENT_INSTRUCTIONS)
-            response = model.generate_content(financial_data_context, generation_config={"temperature": 0.3})
             
-            # AI가 작성한 리포트 결과물
+            # 자동 우회(Fallback) 시스템 도입
+            try:
+                # 1순위: 최신 1.5 Flash 모델 시도
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                response = model.generate_content(financial_data_context, generation_config={"temperature": 0.3})
+            except Exception as flash_error:
+                # 2순위: 1.5 Flash가 막혀있을 경우 범용성이 가장 높은 1.0 Pro 모델로 자동 대체 시도
+                model = genai.GenerativeModel('gemini-pro')
+                response = model.generate_content(financial_data_context, generation_config={"temperature": 0.3})
+            
             ai_report_content = response.text
 
-            # 결과 출력
             st.markdown("---")
             st.markdown('<div class="section-header">📑 최종 AI 에퀴티 리서치 보고서</div>', unsafe_allow_html=True)
-            
-            # 리포트를 화면에 출력
             st.markdown(ai_report_content)
             
-            # 다운로드 버튼
             st.markdown("---")
             st.download_button(
                 label="📥 AI 에퀴티 리서치 보고서(Markdown) 다운로드",
@@ -158,4 +160,4 @@ if analyze_btn or ticker_input:
             )
 
         except Exception as e:
-            st.error(f"LLM API 호출 중 오류가 발생했습니다. API 키가 정확한지 확인해주세요.\n\n상세 에러: {str(e)}")
+            st.error(f"API 호출 중 오류가 발생했습니다. 키가 정확한지 확인해주세요.\n\n상세 에러: {str(e)}")
