@@ -42,7 +42,7 @@ st.markdown("""
 
 # 사이드바 설정 (API 키 입력란 추가)
 st.sidebar.header("🔑 LLM API 설정")
-api_key = st.sidebar.text_input("AQ.Ab8RN6LWvS2iU3OQSjyYZ9SAq9L8eCE7sCg4VBfXsKbC5Y8GEQ", type="password")
+api_key = st.sidebar.text_input("OpenAI API Key 입력 (sk-...)", type="password")
 st.sidebar.caption("※ API 키는 저장되지 않으며, 현재 세션에서만 사용됩니다.")
 st.sidebar.markdown("---")
 
