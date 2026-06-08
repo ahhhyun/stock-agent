@@ -41,7 +41,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 사이드바 설정 (API 키 입력란)
+# 사이드바 설정 (API 키 입력란 추가)
 st.sidebar.header("🔑 LLM API 설정")
 api_key = st.sidebar.text_input("Gemini API Key 입력", type="password")
 st.sidebar.caption("※ API 키는 저장되지 않으며, 현재 세션에서만 사용됩니다.")
@@ -108,7 +108,7 @@ if analyze_btn or ticker_input:
             st.stop()
 
     # ==========================================
-    # 🧠 [Gemini API 호출 부분] 수집된 데이터를 AI에게 전송
+    # 🧠 [LLM API 호출 부분] 수집된 데이터를 AI에게 전송
     # ==========================================
     with st.spinner("2/2: LLM이 데이터를 분석하여 전문 에퀴티 리포트를 집필하고 있습니다... (약 10~20초 소요)"):
         try:
@@ -132,9 +132,9 @@ if analyze_btn or ticker_input:
             지침에 따라 위 데이터를 정밀 분석하고, 최종 투자 의사결정(BUY/HOLD/SELL)이 포함된 에퀴티 리서치 보고서를 마크다운으로 작성해 주십시오.
             """
 
-            # Gemini API 설정 및 호출
+            # Gemini API 설정 (모델명을 -latest로 수정)
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=AGENT_INSTRUCTIONS)
+            model = genai.GenerativeModel('gemini-1.5-flash-latest', system_instruction=AGENT_INSTRUCTIONS)
             response = model.generate_content(financial_data_context, generation_config={"temperature": 0.3})
             
             # AI가 작성한 리포트 결과물
